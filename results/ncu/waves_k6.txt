@@ -1,0 +1,64 @@
+==PROF== Connected to process 3186 (/home/ubuntu/nanoserve/build/bench_sgemm)
+==PROF== Profiling "sgemm_vectorized": 0%....50%....100% - 1 pass
+GPU: NVIDIA L4 | sm_89 | 58 SMs | 23.7 GB
+
+alpha = 1.0, beta = 0.0
+
+M=N=K=2048
+  cuBLAS             1.053 ms   16321.8 GFLOP/s  100.0%
+  vectorized         1.392 ms   12341.4 GFLOP/s   75.6%  err=5.8e-05 
+
+Wrote results/sgemm_NVIDIA_L4.csv
+==PROF== Disconnected from process 3186
+[3186] bench_sgemm@127.0.0.1
+  void sgemm_vectorized<128, 128, 8, 8, 8>(int, int, int, float, const float *, const float *, float, float *) (16, 16, 1)x(256, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: Launch Statistics
+    -------------------------------- --------------- ---------------
+    Metric Name                          Metric Unit    Metric Value
+    -------------------------------- --------------- ---------------
+    Block Size                                                   256
+    Function Cache Configuration                     CachePreferNone
+    Grid Size                                                    256
+    Registers Per Thread             register/thread             105
+    Shared Memory Configuration Size           Kbyte           65.54
+    Driver Shared Memory Per Block       Kbyte/block            1.02
+    Dynamic Shared Memory Per Block       byte/block               0
+    Static Shared Memory Per Block       Kbyte/block            8.19
+    # SMs                                         SM              58
+    Stack Size                                                  1024
+    Threads                                   thread           65536
+    # TPCs                                                        29
+    Enabled TPC IDs                                              all
+    Uses Green Context                                             0
+    Waves Per SM                                                2.21
+    -------------------------------- --------------- ---------------
+
+    OPT   Est. Speedup: 33.33%                                                                                          
+          A wave of thread blocks is defined as the maximum number of blocks that can be executed in parallel on the    
+          target GPU. The number of blocks in a wave depends on the number of multiprocessors and the theoretical       
+          occupancy of the kernel. This kernel launch results in 2 full waves and a partial wave of 24 thread blocks.   
+          Under the assumption of a uniform execution duration of all thread blocks, this partial wave may account for  
+          up to 33.3% of the total runtime of this kernel. Try launching a grid with no partial wave. The overall       
+          impact of this tail effect also lessens with the number of full waves executed for a grid. See the Hardware   
+          Model (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-hw-model) description for     
+          more details on launch configurations.                                                                        
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block            2
+    Block Limit Shared Mem                block            7
+    Block Limit Warps                     block            6
+    Theoretical Active Warps per SM        warp           16
+    Theoretical Occupancy                     %        33.33
+    Achieved Occupancy                        %        30.99
+    Achieved Active Warps Per SM           warp        14.88
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 66.67%                                                                                    
+          The 4.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (33.3%) is limited by the number of required      
+          registers.                                                                                                    
+

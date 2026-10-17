@@ -1,0 +1,77 @@
+==PROF== Connected to process 1959 (/home/ubuntu/nanoserve/build/bench_sgemm)
+==PROF== Profiling "sgemm_smem_tiling": 0%....50%....100% - 13 passes
+GPU: NVIDIA L4 | sm_89 | 58 SMs | 23.7 GB
+
+M=N=K=2048
+  cuBLAS             1.054 ms   16306.0 GFLOP/s  100.0%
+  smem_tiling        7.629 ms    2251.9 GFLOP/s   13.8%  err=5.8e-05 
+
+Wrote results/sgemm_NVIDIA_L4.csv
+==PROF== Disconnected from process 1959
+[1959] bench_sgemm@127.0.0.1
+  void sgemm_smem_tiling<32>(int, int, int, float, const float *, const float *, float, float *) (64, 64, 1)x(32, 32, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         6.24
+    SM Frequency                    Ghz         2.04
+    Elapsed Cycles                cycle     15147061
+    Memory Throughput                 %        84.27
+    DRAM Throughput                   %         2.93
+    Duration                         ms         7.43
+    L1/TEX Cache Throughput           %        84.95
+    L2 Cache Throughput               %        10.71
+    SM Active Cycles              cycle  15002943.57
+    Compute (SM) Throughput           %        84.27
+    ----------------------- ----------- ------------
+
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing workloads in the Compute Workload Analysis section.                                        
+
+    Section: Warp State Statistics
+    ---------------------------------------- ----------- ------------
+    Metric Name                              Metric Unit Metric Value
+    ---------------------------------------- ----------- ------------
+    Warp Cycles Per Issued Instruction             cycle        34.72
+    Warp Cycles Per Executed Instruction           cycle        34.72
+    Avg. Active Threads Per Warp                                   32
+    Avg. Not Predicated Off Threads Per Warp                    31.98
+    ---------------------------------------- ----------- ------------
+
+    WRN   The optional metric smsp__pcsamp_sample_count could not be found. Collecting it as an additional metric could 
+          enable the rule to provide more guidance.                                                                     
+    ----- --------------------------------------------------------------------------------------------------------------
+    OPT   Est. Local Speedup: 61.21%                                                                                    
+          On average, each warp of this workload spends 21.3 cycles being stalled waiting for the MIO (memory           
+          input/output) instruction queue to be not full. This stall reason is high in cases of extreme utilization of  
+          the MIO pipelines, which include special math instructions, dynamic branches, as well as shared memory        
+          instructions. When caused by shared memory accesses, trying to use fewer but wider loads can reduce pipeline  
+          pressure. This stall type represents about 61.2% of the total average of 34.7 cycles between issuing two      
+          instructions.                                                                                                 
+    ----- --------------------------------------------------------------------------------------------------------------
+    INF   Check the Warp Stall Sampling (All Samples) table for the top stall locations in your source based on         
+          sampling data. The Profiling Guide                                                                            
+          (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-reference) provides more details    
+          on each stall reason.                                                                                         
+
+    Section: Occupancy
+    ------------------------------- ----------- ------------
+    Metric Name                     Metric Unit Metric Value
+    ------------------------------- ----------- ------------
+    Block Limit SM                        block           24
+    Block Limit Registers                 block            1
+    Block Limit Shared Mem                block            1
+    Block Limit Warps                     block            1
+    Theoretical Active Warps per SM        warp           32
+    Theoretical Occupancy                     %        66.67
+    Achieved Occupancy                        %        66.60
+    Achieved Active Warps Per SM           warp        31.97
+    ------------------------------- ----------- ------------
+
+    OPT   Est. Local Speedup: 33.33%                                                                                    
+          The 8.00 theoretical warps per scheduler this kernel can issue according to its occupancy are below the       
+          hardware maximum of 12. This kernel's theoretical occupancy (66.7%) is limited by the number of required      
+          registers, and the number of warps within each block.                                                         
+
