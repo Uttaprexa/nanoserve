@@ -10,9 +10,9 @@ vendor library, a roofline position and an Nsight Compute explanation of where i
 | Phase | Deliverable | Baseline to beat | Status |
 |---|---|---|---|
 | 1 | SGEMM, naive → warptiled; then BF16 tensor-core GEMM (`mma.sync`) | cuBLAS | **done: 91% FP32, 90% BF16** |
-| 2 | FlashAttention-2 forward + paged-attention decode | FlashAttention, PyTorch SDPA | next |
+| 2 | FlashAttention-2 forward (+ paged-attention decode: future) | standard attention; FlashAttention / SDPA in Phase 6 | **done: 67 TFLOP/s, up to 17.9x** |
 | 3 | Fused RMSNorm+residual, RoPE, SwiGLU | unfused PyTorch | |
-| 4 | W4A16 / FP8 GEMM with in-register dequant + perplexity check | cuBLASLt, Marlin-style kernels | |
+| 4 | W4A16 / FP8 GEMM with in-register dequant + perplexity check | cuBLASLt, Marlin-style kernels | next |
 | 5 | MoE: fused top-k router + grouped GEMM with token permutation | PyTorch loop over experts | |
 | 6 | Engine: run a real model end to end, tokens/s | llama.cpp, vLLM | |
 | 7 | Hopper port (TMA + WGMMA) of the best GEMM/attention kernel | cuBLAS / FA3 on H100 | |
@@ -53,6 +53,32 @@ cuBLAS: 54 / 75 / 75 TFLOP/s at 1024 / 2048 / 4096, about 4.6x its FP32 throughp
 | 4 | mma_w64x32 | 75.3% | 87.4% | 83.9% | ldmatrix + mma.sync: LDSM replaces LD.E |
 | 4 | **mma_w64x64** | **76.0%** | **89.9%** | **87.3%** | 64x64 warp tiles, 231 regs, 0 spills: **67.5 TFLOP/s** |
 
+## Phase 2 results: FlashAttention-2 forward on an NVIDIA L4
+
+BF16 Q/K/V/O, FP32 softmax and accumulation, BH = 16 (batch x heads). Built on the Phase 1 primitives
+(cp.async, ldmatrix, mma.sync): each warp keeps its Q fragments, running max/sum and 16 x D output
+accumulator in registers; the score matrix goes from the S accumulator straight into P A-fragments and
+never touches shared or global memory. Causal tiles above the diagonal are skipped per block and per warp.
+Both variants pass a double-precision CPU check (max error ~3e-3, bf16 rounding).
+
+Baseline: standard attention = cuBLAS GEMM (S = QK^T, fp32) + softmax kernel (P, bf16) + cuBLAS GEMM.
+At N = 8192 it writes and re-reads 6.4 GB of S and P.
+
+| D | causal | N=1024 | N=2048 | N=4096 | N=8192 | speedup at 8192 |
+|---|---|---|---|---|---|---|
+| 64 | no | 50.6 | 57.2 | 64.3 | 62.8 | 12.0x |
+| 64 | yes | 36.7 | 43.3 | 51.6 | 54.7 | **17.9x** |
+| 128 | no | 49.4 | 59.5 | **67.1** | 61.0 | 6.0x |
+| 128 | yes | 38.6 | 50.2 | 56.1 | 59.5 | 9.9x |
+
+TFLOP/s of the faster variant (useful work only; causal counts half). 67.1 TFLOP/s is about 89% of
+cuBLAS's best BF16 GEMM on this GPU.
+
+**Variant 1** (64 query rows, 4 warps, 64-key tiles) vs **variant 2** (128 rows, 8 warps; 32-key tiles
+for D=128): at D=128, v1 needs 87 KB of smem, so one 4-warp block per SM. v2 fits 8 warps in 70 KB and
+serves each K/V tile to twice as many queries: **+30% at D=128** (51.8 -> 67.1 TFLOP/s). v1 still wins
+for N <= 1024, where 128-row blocks leave too few blocks for 58 SMs (wave quantization again).
+
 ## Quickstart (AWS)
 
 1. Request GPU quota: Service Quotas → EC2 → "Running On-Demand G and VT instances" → 4 or 8 vCPUs.
@@ -62,9 +88,10 @@ cuBLAS: 54 / 75 / 75 TFLOP/s at 1024 / 2048 / 4096, about 4.6x its FP32 throughp
 ```bash
 git clone https://github.com/Uttaprexa/nanoserve.git && cd nanoserve
 ./scripts/setup_ec2.sh          # then `sudo reboot` once for profiler permissions
-make                            # builds both benchmarks; prints registers/spills per kernel
+make                            # builds all benchmarks; prints registers/spills per kernel
 ./build/bench_sgemm             # FP32: correctness + GFLOP/s vs cuBLAS -> results/*.csv
 ./build/bench_hgemm             # BF16 tensor cores vs cuBLAS
+./build/bench_attn              # FlashAttention vs standard attention (+ CPU correctness check)
 make sass                       # load widths (LDS/LDSM) and HMMA counts per kernel
 ```
 
@@ -86,7 +113,8 @@ ncu --section LaunchStats --section Occupancy -k regex:sgemm_warptiling -c 1 ./b
 include/common.cuh          error checks, CUDA-event timer
 kernels/sgemm/NN_*.cuh      FP32 kernels, numbered in optimization order
 kernels/hgemm/NN_*.cuh      BF16 tensor-core kernels; ptx.cuh wraps cp.async, ldmatrix, mma.sync
-bench/bench_*.cu            correctness vs cuBLAS + timing + CSV
+kernels/attn/               FlashAttention-2 forward + standard-attention baseline
+bench/bench_*.cu            correctness vs cuBLAS / CPU reference + timing + CSV
 scripts/                    EC2 setup, build helper, plotting
 results/                    CSVs, plots, ncu reports
 docs/LOG.md                 worklog: what changed, what ncu said, what I learned
