@@ -11,7 +11,7 @@ vendor library, a roofline position and an Nsight Compute explanation of where i
 |---|---|---|---|
 | 1 | SGEMM, naive → warptiled; then BF16 tensor-core GEMM (`mma.sync`) | cuBLAS | **done: 91% FP32, 90% BF16** |
 | 2 | FlashAttention-2 forward (+ paged-attention decode: future) | standard attention; FlashAttention / SDPA in Phase 6 | **done: 67 TFLOP/s, up to 17.9x** |
-| 3 | Fused RMSNorm+residual, RoPE, SwiGLU | unfused PyTorch | |
+| 3 | Fused RMSNorm+residual, RoPE, SwiGLU | eager PyTorch op sequence | **done: 98.5-99.7% of DRAM ceiling** |
 | 4 | W4A16 / FP8 GEMM with in-register dequant + perplexity check | cuBLASLt, Marlin-style kernels | next |
 | 5 | MoE: fused top-k router + grouped GEMM with token permutation | PyTorch loop over experts | |
 | 6 | Engine: run a real model end to end, tokens/s | llama.cpp, vLLM | |
@@ -79,6 +79,26 @@ for D=128): at D=128, v1 needs 87 KB of smem, so one 4-warp block per SM. v2 fit
 serves each K/V tile to twice as many queries: **+30% at D=128** (51.8 -> 67.1 TFLOP/s). v1 still wins
 for N <= 1024, where 128-row blocks leave too few blocks for 58 SMs (wave quantization again).
 
+## Phase 3 results: fused memory-bound ops on an NVIDIA L4
+
+Memory-bound ops are judged by bandwidth, not FLOP/s. Ceiling: a 16-byte copy kernel reaches
+**237 GB/s** on this L4 (the datasheet says 300). Baselines mirror the eager op sequence of HF Llama,
+one vectorized kernel per op. Llama-3-8B shapes: H = 4096, 32 Q / 8 KV heads, D = 128, I = 14336.
+
+T = 16384 tokens (every footprint far exceeds the 48 MB L2, so this measures DRAM):
+
+| Op | Eager kernels | Eager | Fused | Speedup | Predicted (bytes eager / fused) | Fused % of ceiling |
+|---|---|---|---|---|---|---|
+| residual add + RMSNorm | 5 (fp32 temporaries) | 8.40 ms | 2.27 ms | **3.70x** | 30 / 8 = 3.75x | **99.7%** |
+| RoPE on Q and K | 8 (4 per tensor + cos/sin tables) | 6.48 ms | 1.42 ms | **4.55x** | ~18 / 4 | **99.4%** |
+| SwiGLU | 2 | 10.01 ms | 6.03 ms | **1.66x** | 10 / 6 = 1.67x | **98.5%** |
+
+For memory-bound ops, speedup = bytes the eager sequence moves / bytes the fused kernel moves, and the
+measurements match the byte counts almost exactly; the fused kernels sit at the hardware limit.
+Fused RoPE is also 4x more accurate than eager (max error 3e-3 vs 1.3e-2): it computes sin/cos in fp32
+instead of reading bf16-rounded tables. At small T the data fits in L2 and "bandwidth" exceeds DRAM
+(up to 782% of the ceiling); the benchmark flags those rows.
+
 ## Quickstart (AWS)
 
 1. Request GPU quota: Service Quotas → EC2 → "Running On-Demand G and VT instances" → 4 or 8 vCPUs.
@@ -92,6 +112,7 @@ make                            # builds all benchmarks; prints registers/spills
 ./build/bench_sgemm             # FP32: correctness + GFLOP/s vs cuBLAS -> results/*.csv
 ./build/bench_hgemm             # BF16 tensor cores vs cuBLAS
 ./build/bench_attn              # FlashAttention vs standard attention (+ CPU correctness check)
+./build/bench_fused             # fused RMSNorm / RoPE / SwiGLU vs eager, GB/s vs copy ceiling
 make sass                       # load widths (LDS/LDSM) and HMMA counts per kernel
 ```
 
@@ -114,6 +135,7 @@ include/common.cuh          error checks, CUDA-event timer
 kernels/sgemm/NN_*.cuh      FP32 kernels, numbered in optimization order
 kernels/hgemm/NN_*.cuh      BF16 tensor-core kernels; ptx.cuh wraps cp.async, ldmatrix, mma.sync
 kernels/attn/               FlashAttention-2 forward + standard-attention baseline
+kernels/fused/              fused residual+RMSNorm, RoPE, SwiGLU + eager baselines
 bench/bench_*.cu            correctness vs cuBLAS / CPU reference + timing + CSV
 scripts/                    EC2 setup, build helper, plotting
 results/                    CSVs, plots, ncu reports
