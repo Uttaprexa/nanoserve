@@ -13,7 +13,7 @@ vendor library, a roofline position and an Nsight Compute explanation of where i
 | 2 | FlashAttention-2 forward (+ paged-attention decode: future) | standard attention; FlashAttention / SDPA in Phase 6 | **done: 67 TFLOP/s, up to 17.9x** |
 | 3 | Fused RMSNorm+residual, RoPE, SwiGLU | eager PyTorch op sequence | **done: 98.5-99.7% of DRAM ceiling** |
 | 4 | W4A16 GEMV (decode) + tensor-core GEMM (prefill); perplexity check in Phase 6 | cuBLAS BF16 | **done: 3.4-3.7x decode (M=1), 2.4-3.2x (M=8)** |
-| 5 | MoE: fused top-k router + grouped GEMM with token permutation | PyTorch loop over experts | |
+| 5 | MoE: fused top-k router, device-side permutation, grouped GEMM | HF-style per-expert loop (cuBLAS) | **done: 1.16x for many small experts; profiled gaps** |
 | 6 | Engine: run a real model end to end, tokens/s | llama.cpp, vLLM | next |
 | 7 | Hopper port (TMA + WGMMA) of the best GEMM/attention kernel | cuBLAS / FA3 on H100 | |
 
@@ -140,6 +140,44 @@ so large prefill batches can stay on bf16 kernels.
 Correctness: exact match to a CPU reference on the dequantized weights (max error 1e-7 GEMV, 2e-3 GEMM).
 Quantization error on random uniform weights: 7.05% (pessimistic; real-model perplexity in Phase 6).
 
+## Phase 5 results: Mixture-of-Experts on an NVIDIA L4
+
+Fused pipeline (9 launches, no host sync): router GEMM -> fused top-k + softmax (one warp per token) ->
+device-side permutation (count, scan, scatter) -> **grouped GEMM** (one launch for all experts, token
+rows gathered while loading A, ragged tiles zero-filled) -> Phase 3 fused SwiGLU -> grouped GEMM ->
+fused weighted combine. Baseline: HF Mixtral's per-expert loop (device->host sync for the counts, then
+gather, 3 cuBLAS GEMMs, silu, mul, index_add per expert). Both share the router, top-k and permutation.
+
+| Config | T | Loop (HF-style) | Fused | Speedup |
+|---|---|---|---|---|
+| qwen-moe (E=60, k=4, H=2048, I=1408) | 16 | 4.14 ms | 3.56 ms | **1.16x** |
+| | 512 | 5.64 ms | 4.88 ms | **1.16x** |
+| | 4096 | 8.10 ms | 10.76 ms | 0.75x |
+| mixtral (E=8, k=2, H=4096, I=14336) | 16 | 11.45 ms | 12.20 ms | 0.94x |
+| | 512 | 14.42 ms | 17.72 ms | 0.81x |
+| | 4096 | 58.31 ms | 72.88 ms | 0.80x |
+
+**Optimization journey (each step from an Nsight Compute measurement):**
+
+| Step | Finding | Fix | Effect |
+|---|---|---|---|
+| v1 | fused 0.43-0.98x everywhere | | |
+| 1 | blocks walked n tiles fastest: every 1 MB weight slice of a 117 MB expert re-read per m tile | expert-major raster, m tiles fastest | mixtral T=4096: 133 -> 73 ms; L2 hit rate 96% |
+| 2 | 32-row tiles for few tokens/expert changed nothing at T=16 | (decode was never compute-bound) | |
+| 3 | decode GEMMs: DRAM 91% busy but moving ~1.5x the weight bytes (64 B per row per K tile; the rest of each 128 B line often evicted) | BK = 64 for the decode tile config | bytes 2.8 -> 2.35 GB, mixtral T=16: 15.6 -> 12.2 ms, qwen-moe now 1.16x faster |
+
+**Findings:**
+- The textbook case for MoE fusion, kernel-launch overhead, barely mattered here: the loop's ~420 launches
+  for qwen-moe overlap with memory-bound GEMMs. GEMM efficiency and memory traffic decided the outcome.
+- Fused wins for many small experts at small batch (the direction of recent MoE models). With 8 large
+  experts, the loop runs 8 big cuBLAS GEMMs, and the gap is GEMM-core quality (grouped GEMM at 77% SM
+  throughput, 96% L2 hit rate), as in Phase 1.
+- Open questions: decode still reads 1.25x the weight bytes (next: compare cuBLAS's bytes per weight,
+  then BK = 128 or TMA); SwiGLU could move into the gate_up GEMM epilogue to skip the 2I-wide round trip.
+
+Correctness: top-k ids and weights match a CPU reference exactly; both paths match a double-precision
+layer reference (fused 4e-5 / 2e-4, loop 3e-3) for both tile shapes.
+
 ## Quickstart (AWS)
 
 1. Request GPU quota: Service Quotas → EC2 → "Running On-Demand G and VT instances" → 4 or 8 vCPUs.
@@ -155,6 +193,7 @@ make                            # builds all benchmarks; prints registers/spills
 ./build/bench_attn              # FlashAttention vs standard attention (+ CPU correctness check)
 ./build/bench_fused             # fused RMSNorm / RoPE / SwiGLU vs eager, GB/s vs copy ceiling
 ./build/bench_w4a16             # 4-bit GEMV (decode) and GEMM (prefill) vs cuBLAS bf16
+./build/bench_moe               # MoE layer: fused pipeline vs per-expert loop
 make sass                       # load widths (LDS/LDSM) and HMMA counts per kernel
 ```
 
@@ -179,6 +218,7 @@ kernels/hgemm/NN_*.cuh      BF16 tensor-core kernels; ptx.cuh wraps cp.async, ld
 kernels/attn/               FlashAttention-2 forward + standard-attention baseline
 kernels/fused/              fused residual+RMSNorm, RoPE, SwiGLU + eager baselines
 kernels/quant/              W4A16 GEMV + tensor-core GEMM with in-smem dequantization
+kernels/moe/                top-k router, device permutation, grouped GEMM, combine
 bench/bench_*.cu            correctness vs cuBLAS / CPU reference + timing + CSV
 scripts/                    EC2 setup, build helper, plotting
 results/                    CSVs, plots, ncu reports

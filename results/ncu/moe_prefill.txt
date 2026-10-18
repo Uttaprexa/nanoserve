@@ -1,0 +1,92 @@
+==PROF== Connected to process 6532 (/home/ubuntu/nanoserve/build/bench_moe)
+==PROF== Profiling "_Z23moe_grouped_gemm_kernelILi128ELi128ELi32ELi2ELi2ELi2E13__nv_bfloat16EvPKS0_PKiS2_PT5_S4_S4_iii": 0%....50%....100% - 14 passes
+GPU: NVIDIA L4 | sm_89 | 58 SMs
+
+[1] Correctness vs double-precision CPU reference (E=8, k=2, H=256, I=256)
+  T=64    BM=32  top-k: match   fused err=3.7e-05   loop err=2.7e-03   PASS
+  T=1024  BM=128 top-k: match   fused err=1.7e-04   loop err=2.5e-03   PASS
+
+[2] Speed: expert MLPs + routing (router, top-k, permutation timed in both)
+
+  mixtral: E=8 k=2 H=4096 I=14336
+       T   active    BM    loop ms   fused ms   speedup fused TFLOP/s   max err
+      16     8/8     32     11.691     15.606     0.75x           0.7   2.9e-03
+     512     8/8    128     14.603     17.862     0.82x          20.2   3.0e-03
+    4096     8/8    128     58.376     74.751     0.78x          38.6   2.8e-03
+
+  qwen-moe: E=60 k=4 H=2048 I=1408
+       T   active    BM    loop ms   fused ms   speedup fused TFLOP/s   max err
+      16    39/60    32     28.795      3.778     7.62x           0.3   3.4e-03
+     512    60/60    32     48.080      6.119     7.86x           5.8   3.4e-03
+    4096    60/60   128     45.916      9.081     5.06x          31.2   4.0e-03
+
+Wrote results/moe_NVIDIA_L4.csv
+==PROF== Disconnected from process 6532
+[6532] bench_moe@127.0.0.1
+  void moe_grouped_gemm_kernel<128, 128, 32, 2, 2, 2, __nv_bfloat16>(const __nv_bfloat16 *, const int *, const __nv_bfloat16 *, T7 *, const int *, const int *, int, int, int) (16128, 1, 1)x(128, 1, 1), Context 1, Stream 7, Device 0, CC 8.9
+    Section: GPU Speed Of Light Throughput
+    ----------------------- ----------- ------------
+    Metric Name             Metric Unit Metric Value
+    ----------------------- ----------- ------------
+    DRAM Frequency                  Ghz         6.24
+    SM Frequency                    Ghz         1.35
+    Elapsed Cycles                cycle     45312952
+    Memory Throughput                 %        87.85
+    DRAM Throughput                   %        34.86
+    Duration                         ms        33.37
+    L1/TEX Cache Throughput           %        55.99
+    L2 Cache Throughput               %        87.85
+    SM Active Cycles              cycle  45098073.64
+    Compute (SM) Throughput           %        77.31
+    ----------------------- ----------- ------------
+
+    INF   This workload is utilizing greater than 80.0% of the available compute or memory performance of this device.  
+          To further improve performance, work will likely need to be shifted from the most utilized to another unit.   
+          Start by analyzing workloads in the Memory Workload Analysis section.                                         
+
+    Section: Memory Workload Analysis
+    --------------------------------------- ----------- ------------
+    Metric Name                             Metric Unit Metric Value
+    --------------------------------------- ----------- ------------
+    Local Memory Spilling Requests                                 0
+    Local Memory Spilling Request Overhead            %            0
+    L2 Sector Promotion Misses                        %            0
+    Shared Memory Spilling Requests                                0
+    Shared Memory Spilling Request Overhead           %            0
+    Memory Throughput                           Gbyte/s       104.49
+    Mem Busy                                          %        87.85
+    Max Bandwidth                                     %        68.22
+    L1/TEX Hit Rate                                   %         1.97
+    L2 Persisting Size                            Mbyte         9.44
+    L2 Compression Success Rate                       %            0
+    L2 Compression Ratio                                           0
+    L2 Compression Input Sectors                 sector            0
+    L2 Hit Rate                                       %        95.94
+    Mem Pipes Busy                                    %        17.28
+    --------------------------------------- ----------- ------------
+
+    Section: Warp State Statistics
+    ---------------------------------------- ----------- ------------
+    Metric Name                              Metric Unit Metric Value
+    ---------------------------------------- ----------- ------------
+    Warp Cycles Per Issued Instruction             cycle        16.84
+    Warp Cycles Per Executed Instruction           cycle        16.84
+    Avg. Active Threads Per Warp                                32.00
+    Avg. Not Predicated Off Threads Per Warp                    31.14
+    ---------------------------------------- ----------- ------------
+
+    WRN   The optional metric smsp__pcsamp_sample_count could not be found. Collecting it as an additional metric could 
+          enable the rule to provide more guidance.                                                                     
+    ----- --------------------------------------------------------------------------------------------------------------
+    OPT   Est. Local Speedup: 30.02%                                                                                    
+          On average, each warp of this workload spends 5.1 cycles being stalled waiting for the execution pipe to be   
+          available. This stall occurs when all active warps execute their next instruction on a specific,              
+          oversubscribed math pipeline. Try to increase the number of active warps to hide the existent latency or try  
+          changing the instruction mix to utilize all available pipelines in a more balanced way. This stall type       
+          represents about 30.0% of the total average of 16.8 cycles between issuing two instructions.                  
+    ----- --------------------------------------------------------------------------------------------------------------
+    INF   Check the Warp Stall Sampling (All Samples) table for the top stall locations in your source based on         
+          sampling data. The Profiling Guide                                                                            
+          (https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#metrics-reference) provides more details    
+          on each stall reason.                                                                                         
+
