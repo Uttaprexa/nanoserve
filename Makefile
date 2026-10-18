@@ -13,15 +13,17 @@ SGEMM_DEPS := include/common.cuh $(wildcard kernels/sgemm/*.cuh)
 HGEMM_DEPS := include/common.cuh $(wildcard kernels/hgemm/*.cuh)
 ATTN_DEPS  := include/common.cuh $(wildcard kernels/attn/*.cuh) kernels/hgemm/ptx.cuh
 FUSED_DEPS := include/common.cuh $(wildcard kernels/fused/*.cuh)
+W4_DEPS    := include/common.cuh $(wildcard kernels/quant/*.cuh) kernels/fused/vec.cuh kernels/hgemm/ptx.cuh
 
 
-.PHONY: all sgemm hgemm attn fused run run-hgemm run-attn run-fused sass clean
+.PHONY: all sgemm hgemm attn fused w4a16 run run-hgemm run-attn run-fused run-w4a16 sass clean
 
-all: sgemm hgemm attn fused
+all: sgemm hgemm attn fused w4a16
 sgemm: build/bench_sgemm
 hgemm: build/bench_hgemm
 attn: build/bench_attn
 fused: build/bench_fused
+w4a16: build/bench_w4a16
 
 build/bench_sgemm: bench/bench_sgemm.cu $(SGEMM_DEPS)
 > @bash scripts/nvcc_build.sh sgemm $(NVCC) $(NVCCFLAGS) $< -o $@ $(LDLIBS)
@@ -35,6 +37,9 @@ build/bench_attn: bench/bench_attn.cu $(ATTN_DEPS)
 build/bench_fused: bench/bench_fused.cu $(FUSED_DEPS)
 > @bash scripts/nvcc_build.sh fused $(NVCC) $(NVCCFLAGS) $< -o $@ $(LDLIBS)
 
+build/bench_w4a16: bench/bench_w4a16.cu $(W4_DEPS)
+> @bash scripts/nvcc_build.sh w4a16 $(NVCC) $(NVCCFLAGS) $< -o $@ $(LDLIBS)
+
 run: build/bench_sgemm
 > ./build/bench_sgemm
 
@@ -46,6 +51,9 @@ run-attn: build/bench_attn
 
 run-fused: build/bench_fused
 > ./build/bench_fused
+
+run-w4a16: build/bench_w4a16
+> ./build/bench_w4a16
 
 # Dump SASS so you can confirm what the compiler emitted (e.g. FFMA, LDS.128, HMMA).
 sass: build/bench_sgemm build/bench_hgemm

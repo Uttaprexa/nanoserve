@@ -12,9 +12,9 @@ vendor library, a roofline position and an Nsight Compute explanation of where i
 | 1 | SGEMM, naive → warptiled; then BF16 tensor-core GEMM (`mma.sync`) | cuBLAS | **done: 91% FP32, 90% BF16** |
 | 2 | FlashAttention-2 forward (+ paged-attention decode: future) | standard attention; FlashAttention / SDPA in Phase 6 | **done: 67 TFLOP/s, up to 17.9x** |
 | 3 | Fused RMSNorm+residual, RoPE, SwiGLU | eager PyTorch op sequence | **done: 98.5-99.7% of DRAM ceiling** |
-| 4 | W4A16 / FP8 GEMM with in-register dequant + perplexity check | cuBLASLt, Marlin-style kernels | next |
+| 4 | W4A16 GEMV (decode) + tensor-core GEMM (prefill); perplexity check in Phase 6 | cuBLAS BF16 | **done: 3.4-3.7x decode (M=1), 2.4-3.2x (M=8)** |
 | 5 | MoE: fused top-k router + grouped GEMM with token permutation | PyTorch loop over experts | |
-| 6 | Engine: run a real model end to end, tokens/s | llama.cpp, vLLM | |
+| 6 | Engine: run a real model end to end, tokens/s | llama.cpp, vLLM | next |
 | 7 | Hopper port (TMA + WGMMA) of the best GEMM/attention kernel | cuBLAS / FA3 on H100 | |
 
 ## Phase 1 results: GEMM on an NVIDIA L4
@@ -99,6 +99,47 @@ Fused RoPE is also 4x more accurate than eager (max error 3e-3 vs 1.3e-2): it co
 instead of reading bf16-rounded tables. At small T the data fits in L2 and "bandwidth" exceeds DRAM
 (up to 782% of the ceiling); the benchmark flags those rows.
 
+## Phase 4 results: W4A16 quantized linear layers on an NVIDIA L4
+
+Weights: 4-bit, group-wise symmetric (group 128 along K, one bf16 scale per group, w = (q - 8) * s),
+0.516 bytes per weight vs 2 for bf16. Activations bf16, accumulation fp32. Llama-3-8B layer shapes.
+Weights rotate through ~200 MB of copies so every timed run streams from DRAM, not L2.
+
+**Decode, 1 token (GEMV, memory-bound):**
+
+| Layer (N x K) | cuBLAS bf16 | W4 GEMV | Speedup | W4 GB/s (% of copy ceiling) |
+|---|---|---|---|---|
+| qkv 6144x4096 | 0.201 ms | 0.057 ms | **3.52x** | 227 (96%) |
+| o 4096x4096 | 0.136 ms | 0.040 ms | **3.43x** | 219 (93%) |
+| gate_up 28672x4096 | 0.899 ms | 0.242 ms | **3.71x** | 250 (106%) |
+| down 4096x14336 | 0.454 ms | 0.126 ms | **3.62x** | 242 (102%) |
+
+Ideal: 2 / 0.516 = 3.9x. Over 100%: the copy-kernel ceiling is half writes; a read-only stream runs
+slightly faster (a read-only bandwidth test is on the to-do list).
+
+**Decode, 8 tokens (batched decode): a profiler-driven fix.**
+
+| Layer | cuBLAS bf16 | W4, 1 row/warp | W4, 4 rows/warp | Speedup (final) | % of ceiling (final) |
+|---|---|---|---|---|---|
+| qkv | 0.205 ms | 0.127 ms | 0.071 ms | **2.87x** | 78% |
+| o | 0.136 ms | 0.093 ms | 0.056 ms | **2.44x** | 67% |
+| gate_up | 0.946 ms | 0.671 ms | 0.299 ms | **3.16x** | 87% |
+| down | 0.472 ms | 0.373 ms | 0.178 ms | **2.66x** | 73% |
+
+The first version gave only 1.3-1.6x at M = 8 while cuBLAS time stayed flat from M = 1 to 8, so the GEMV
+had stopped being memory-bound. Nsight Compute: **L1/TEX 89%, DRAM 38%, compute 33%**: L1-bound, from
+every warp re-reading X for its single output row. Fix: each warp computes 4 rows and reuses each X chunk
+4 times. After: **L1/TEX 41%, DRAM 55%**, and 2x faster. Nothing is saturated now, which points to
+latency: 194 registers/thread leave one 8-warp block per SM, too few loads in flight (next lever).
+
+**Prefill (M = 512-2048):** 49-80% of cuBLAS bf16 (best 52.4 TFLOP/s). Each K tile takes an extra smem
+round trip (packed -> dequantized bf16 tile -> ldmatrix) and an extra barrier; Marlin-style kernels
+dequantize straight into registers from pre-shuffled weights. 4-bit weights save memory, not compute,
+so large prefill batches can stay on bf16 kernels.
+
+Correctness: exact match to a CPU reference on the dequantized weights (max error 1e-7 GEMV, 2e-3 GEMM).
+Quantization error on random uniform weights: 7.05% (pessimistic; real-model perplexity in Phase 6).
+
 ## Quickstart (AWS)
 
 1. Request GPU quota: Service Quotas → EC2 → "Running On-Demand G and VT instances" → 4 or 8 vCPUs.
@@ -113,6 +154,7 @@ make                            # builds all benchmarks; prints registers/spills
 ./build/bench_hgemm             # BF16 tensor cores vs cuBLAS
 ./build/bench_attn              # FlashAttention vs standard attention (+ CPU correctness check)
 ./build/bench_fused             # fused RMSNorm / RoPE / SwiGLU vs eager, GB/s vs copy ceiling
+./build/bench_w4a16             # 4-bit GEMV (decode) and GEMM (prefill) vs cuBLAS bf16
 make sass                       # load widths (LDS/LDSM) and HMMA counts per kernel
 ```
 
@@ -136,6 +178,7 @@ kernels/sgemm/NN_*.cuh      FP32 kernels, numbered in optimization order
 kernels/hgemm/NN_*.cuh      BF16 tensor-core kernels; ptx.cuh wraps cp.async, ldmatrix, mma.sync
 kernels/attn/               FlashAttention-2 forward + standard-attention baseline
 kernels/fused/              fused residual+RMSNorm, RoPE, SwiGLU + eager baselines
+kernels/quant/              W4A16 GEMV + tensor-core GEMM with in-smem dequantization
 bench/bench_*.cu            correctness vs cuBLAS / CPU reference + timing + CSV
 scripts/                    EC2 setup, build helper, plotting
 results/                    CSVs, plots, ncu reports
