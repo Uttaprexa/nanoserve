@@ -1,0 +1,48 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+GPU: NVIDIA L4 | torch 2.14.1+cu130 | model Qwen/Qwen2.5-7B
+Fetching 4 files:   0%|          | 0/4 [00:00<?, ?it/s]Fetching 4 files:  25%|██▌       | 1/4 [01:24<04:14, 84.87s/it]Fetching 4 files:  75%|███████▌  | 3/4 [01:40<00:27, 27.83s/it]Fetching 4 files: 100%|██████████| 4/4 [01:57<00:00, 23.98s/it]Fetching 4 files: 100%|██████████| 4/4 [01:57<00:00, 29.33s/it]
+Loading weights:   0%|          | 0/339 [00:00<?, ?it/s]Loading weights:   0%|          | 1/339 [00:14<1:19:21, 14.09s/it]Loading weights:  12%|█▏        | 40/339 [00:14<01:15,  3.97it/s] Loading weights:  22%|██▏       | 76/339 [00:16<00:36,  7.14it/s]Loading weights:  27%|██▋       | 90/339 [00:20<00:44,  5.64it/s]Loading weights:  29%|██▉       | 98/339 [00:20<00:37,  6.35it/s]Loading weights:  31%|███       | 104/339 [00:22<00:40,  5.80it/s]Loading weights:  37%|███▋      | 124/339 [00:23<00:26,  8.19it/s]Loading weights:  37%|███▋      | 127/339 [00:25<00:35,  5.93it/s]Loading weights:  38%|███▊      | 130/339 [00:25<00:33,  6.31it/s]Loading weights:  39%|███▉      | 132/339 [00:25<00:31,  6.52it/s]Loading weights:  40%|███▉      | 135/339 [00:26<00:37,  5.38it/s]Loading weights:  40%|████      | 137/339 [00:27<00:46,  4.35it/s]Loading weights:  41%|████      | 138/339 [00:28<01:00,  3.32it/s]Loading weights:  42%|████▏     | 142/339 [00:29<00:43,  4.56it/s]Loading weights:  42%|████▏     | 144/339 [00:29<00:38,  5.12it/s]Loading weights:  44%|████▎     | 148/339 [00:30<00:42,  4.51it/s]Loading weights:  44%|████▍     | 149/339 [00:31<00:59,  3.20it/s]Loading weights:  44%|████▍     | 150/339 [00:32<01:18,  2.41it/s]Loading weights:  45%|████▌     | 154/339 [00:32<00:47,  3.91it/s]Loading weights:  46%|████▌     | 156/339 [00:32<00:39,  4.59it/s]Loading weights:  47%|████▋     | 160/339 [00:33<00:42,  4.25it/s]Loading weights:  47%|████▋     | 161/339 [00:35<00:59,  2.97it/s]Loading weights:  48%|████▊     | 162/339 [00:36<01:18,  2.25it/s]Loading weights:  49%|████▉     | 166/339 [00:36<00:45,  3.81it/s]Loading weights:  49%|████▉     | 167/339 [00:36<00:43,  3.93it/s]Loading weights:  51%|█████     | 172/339 [00:38<00:56,  2.97it/s]Loading weights:  51%|█████▏    | 174/339 [00:39<01:02,  2.64it/s]Loading weights:  53%|█████▎    | 178/339 [00:40<00:43,  3.68it/s]Loading weights:  54%|█████▍    | 184/339 [00:41<00:35,  4.39it/s]Loading weights:  55%|█████▍    | 185/339 [00:42<00:47,  3.26it/s]Loading weights:  55%|█████▍    | 186/339 [00:43<01:00,  2.52it/s]Loading weights:  56%|█████▌    | 190/339 [00:43<00:41,  3.62it/s]Loading weights:  58%|█████▊    | 196/339 [00:44<00:32,  4.35it/s]Loading weights:  58%|█████▊    | 197/339 [00:46<00:59,  2.41it/s]Loading weights:  60%|█████▉    | 202/339 [00:46<00:35,  3.85it/s]Loading weights:  60%|█████▉    | 203/339 [00:47<00:34,  3.94it/s]Loading weights:  61%|██████    | 207/339 [00:48<00:34,  3.87it/s]Loading weights:  62%|██████▏   | 209/339 [00:49<00:40,  3.20it/s]Loading weights:  62%|██████▏   | 210/339 [00:50<00:52,  2.44it/s]Loading weights:  63%|██████▎   | 214/339 [00:50<00:32,  3.90it/s]Loading weights:  63%|██████▎   | 215/339 [00:50<00:30,  4.02it/s]Loading weights:  65%|██████▍   | 220/339 [00:51<00:27,  4.33it/s]Loading weights:  65%|██████▌   | 221/339 [00:52<00:38,  3.04it/s]Loading weights:  65%|██████▌   | 222/339 [00:53<00:50,  2.30it/s]Loading weights:  67%|██████▋   | 226/339 [00:54<00:29,  3.84it/s]Loading weights:  67%|██████▋   | 228/339 [00:54<00:24,  4.55it/s]Loading weights:  68%|██████▊   | 232/339 [00:55<00:25,  4.18it/s]Loading weights:  69%|██████▊   | 233/339 [00:56<00:36,  2.93it/s]Loading weights:  69%|██████▉   | 234/339 [00:57<00:47,  2.22it/s]Loading weights:  70%|███████   | 238/339 [00:57<00:29,  3.48it/s]Loading weights:  72%|███████▏  | 244/339 [00:58<00:22,  4.31it/s]Loading weights:  72%|███████▏  | 245/339 [00:59<00:29,  3.15it/s]Loading weights:  73%|███████▎  | 246/339 [01:00<00:38,  2.42it/s]Loading weights:  74%|███████▎  | 250/339 [01:01<00:24,  3.56it/s]Loading weights:  75%|███████▌  | 255/339 [01:02<00:21,  3.99it/s]Loading weights:  76%|███████▌  | 257/339 [01:03<00:24,  3.29it/s]Loading weights:  76%|███████▌  | 258/339 [01:04<00:32,  2.53it/s]Loading weights:  77%|███████▋  | 262/339 [01:04<00:19,  3.94it/s]Loading weights:  78%|███████▊  | 264/339 [01:04<00:16,  4.59it/s]Loading weights:  79%|███████▉  | 268/339 [01:06<00:24,  2.95it/s]Loading weights:  80%|███████▉  | 270/339 [01:08<00:26,  2.63it/s]Loading weights:  81%|████████  | 274/339 [01:08<00:16,  3.94it/s]Loading weights:  81%|████████  | 275/339 [01:08<00:15,  4.05it/s]Loading weights:  83%|████████▎ | 280/339 [01:09<00:13,  4.34it/s]Loading weights:  83%|████████▎ | 281/339 [01:10<00:18,  3.08it/s]Loading weights:  83%|████████▎ | 282/339 [01:11<00:24,  2.34it/s]Loading weights:  84%|████████▍ | 286/339 [01:12<00:14,  3.54it/s]Loading weights:  86%|████████▌ | 292/339 [01:14<00:14,  3.18it/s]Loading weights:  87%|████████▋ | 294/339 [01:15<00:15,  2.82it/s]Loading weights:  88%|████████▊ | 298/339 [01:15<00:10,  4.02it/s]Loading weights:  88%|████████▊ | 300/339 [01:15<00:08,  4.58it/s]Loading weights:  90%|████████▉ | 304/339 [01:16<00:08,  4.24it/s]Loading weights:  90%|████████▉ | 305/339 [01:17<00:11,  3.05it/s]Loading weights:  90%|█████████ | 306/339 [01:18<00:14,  2.33it/s]Loading weights:  91%|█████████▏| 310/339 [01:19<00:08,  3.51it/s]Loading weights:  93%|█████████▎| 316/339 [01:21<00:07,  3.17it/s]Loading weights:  94%|█████████▍| 318/339 [01:22<00:07,  2.82it/s]Loading weights:  95%|█████████▍| 322/339 [01:22<00:04,  4.01it/s]Loading weights:  96%|█████████▌| 324/339 [01:22<00:03,  4.57it/s]Loading weights:  97%|█████████▋| 328/339 [01:23<00:02,  4.24it/s]Loading weights:  97%|█████████▋| 329/339 [01:24<00:03,  3.05it/s]Loading weights:  97%|█████████▋| 330/339 [01:25<00:03,  2.33it/s]Loading weights:  99%|█████████▊| 334/339 [01:26<00:01,  3.82it/s]Loading weights:  99%|█████████▉| 335/339 [01:26<00:01,  3.96it/s]Loading weights: 100%|██████████| 339/339 [01:26<00:00,  3.93it/s]
+[transformers] Token indices sequence length is longer than the specified maximum sequence length for this model (299078 > 131072). Running this sequence through the model will result in indexing errors
+  layers=28 hidden=3584 heads=28 kv_heads=4 head_dim=128 intermediate=18944
+
+[1] Logits vs Hugging Face on the first 512 tokens of WikiText-2 (test)
+  configuration                       top-1 agree  max |dlogit|  mean |dlogit|
+  torch ops                                98.44%         0.570         0.0440
+  norm | bf16                              98.63%         0.514         0.0442
+  rope | bf16                              98.63%         0.500         0.0463
+  flash | bf16                             98.63%         0.562         0.0463
+  swiglu | bf16                            98.63%         0.531         0.0449
+  norm+rope+flash+swiglu | bf16            98.83%         0.688         0.0447
+  (quantized all linear layers to 4 bits in 0.2 s)
+  norm+rope+flash+swiglu | W4              87.30%        14.594         0.7894
+
+[2] Perplexity on WikiText-2 (test): 16 chunks x 512 tokens
+  HF bf16             8.666
+  nanoserve bf16      8.668   (+0.02% vs HF)
+  nanoserve W4 g128  10.026   (+15.69% vs HF)   0.516 B/weight
+
+[3] Causal attention at model shapes (Hq=28, Hkv=4, D=128), TFLOP/s
+       N   SDPA ms  TFLOP/s   ours ms  TFLOP/s  ours/SDPA  max diff
+    1024     0.211     35.7     0.288     26.1      0.73x    0.0078
+    2048     0.569     52.8     0.762     39.4      0.75x    0.0039
+    4096     2.181     55.1     2.898     41.5      0.75x    0.0039
+
+[4] Prompt processing (prefill, logits for every position), tokens/s
+       T         HF  nanoserve bf16  nanoserve W4
+     512       2978            3068          2659
+    2048       3485            3791          2818
+
+[5] Generation: 128-token prompt, 64 new tokens (greedy), decode tokens/s
+  HF bf16             17.3 tok/s
+  nanoserve bf16      17.7 tok/s   (1.02x)
+  nanoserve W4        45.1 tok/s   (2.61x)
+
+[6] Greedy continuations of "The key idea behind FlashAttention is"
+  HF bf16            ' to use a block-sparse attention mask, where each block is a square matrix of size $M \\times M$. The mask is filled with ones in the upper triangle and zeros elsewhere. The attention'
+  runner, torch ops  ' to use a block-sparse attention mask, where each block is a square matrix of size $M \\times M$. The mask is filled with ones in the upper triangle and zeros elsewhere. The attention'
+  nanoserve bf16     ' to use a block-sparse attention mask to reduce the number of FLOPs and memory accesses. The block-sparse attention mask is a binary matrix that indicates which attention heads are allowed to attend to'
+  nanoserve W4       ' to reduce the number of FLOPs required to compute the softmax normalization factor in the attention operation. This is achieved by using a more efficient algorithm for computing the softmax normalization factor, which reduces the number'
+  tokens matching HF: runner with torch ops 40/40, with nanoserve kernels 8/40
+  nanoserve kernels vs the same runner with torch ops: 8/40
+
+Wrote results/e2e_Qwen2.5-7B.json

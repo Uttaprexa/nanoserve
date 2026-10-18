@@ -1,0 +1,105 @@
+{
+  "gpu": "NVIDIA L4",
+  "model": "Qwen/Qwen2.5-1.5B",
+  "torch": "2.14.1+cu130",
+  "correctness": [
+    [
+      "torch ops",
+      98.4375,
+      1.3828125,
+      0.042029183357954025
+    ],
+    [
+      "norm | bf16",
+      98.6328125,
+      1.0166015625,
+      0.04211411625146866
+    ],
+    [
+      "rope | bf16",
+      98.828125,
+      1.3828125,
+      0.0419079065322876
+    ],
+    [
+      "flash | bf16",
+      97.4609375,
+      1.3828125,
+      0.041258376091718674
+    ],
+    [
+      "swiglu | bf16",
+      98.4375,
+      1.8515625,
+      0.041454117745161057
+    ],
+    [
+      "norm+rope+flash+swiglu | bf16",
+      98.4375,
+      0.802734375,
+      0.04129764065146446
+    ],
+    [
+      "norm+rope+flash+swiglu | W4",
+      82.2265625,
+      19.640625,
+      0.7004750370979309
+    ]
+  ],
+  "perplexity": {
+    "source": "WikiText-2 (test)",
+    "hf": 14.334401312223154,
+    "nanoserve_bf16": 14.353428932361835,
+    "nanoserve_w4_by_group": {
+      "128": 17.561691738030678,
+      "64": 16.598581560392304,
+      "32": 16.073576451937857
+    }
+  },
+  "attention": [
+    [
+      1024,
+      0.07106559872627258,
+      0.07495520114898682
+    ],
+    [
+      2048,
+      0.2136064052581787,
+      0.23573119640350343
+    ],
+    [
+      4096,
+      0.776254415512085,
+      1.1265024185180663
+    ]
+  ],
+  "prefill_ms": [
+    [
+      512,
+      39.61915588378906,
+      37.51280517578125,
+      48.699188232421875
+    ],
+    [
+      2048,
+      154.83883056640624,
+      138.17322998046876,
+      175.61497802734374
+    ]
+  ],
+  "decode_tok_s": {
+    "hf": 46.82661131705003,
+    "nanoserve_bf16": 71.78324683468068,
+    "nanoserve_w4": 71.93578463588881
+  },
+  "samples": {
+    "prompt": "The key idea behind FlashAttention is",
+    "hf": " to use a self-attention mechanism to compute the attention weights for each token in the input sequence. The attention weights are then used to compute the weighted sum of the input sequence, which is the output",
+    "runner_torch_ops": " to use a 1D convolution to compute the attention weights. The convolution is applied to the query and key vectors, and the result is a vector of attention weights. The attention weights are then used",
+    "nanoserve_bf16": " to use a 1D convolution to compute the attention weights. The convolution is applied to the query and key vectors, and the result is a vector of attention weights. The attention weights are then used",
+    "nanoserve_w4": " to use a single attention mechanism to simultaneously attend to multiple inputs. The attention mechanism is a linear combination of the inputs, and the weights of the combination are learned. The FlashAttention mechanism is a linear",
+    "match_hf_torch_ops": 3,
+    "match_hf_nanoserve": 3,
+    "match_torch_ops_nanoserve": 40
+  }
+}

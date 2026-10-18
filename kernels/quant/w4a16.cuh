@@ -22,6 +22,9 @@ __device__ __forceinline__ float w4_warp_sum(float v) {
   for (int o = 16; o > 0; o >>= 1) v += __shfl_xor_sync(0xffffffffu, v, o);
   return v;
 }
+__device__ __forceinline__ void store_out(float* p, float v) { *p = v; }
+__device__ __forceinline__ void store_out(__nv_bfloat16* p, float v) { *p = __float2bfloat16(v); }
+
 // 8 packed nibbles -> 8 dequantized floats
 __device__ __forceinline__ void dequant8(uint32_t q, float s, float* f) {
 #pragma unroll
@@ -36,10 +39,10 @@ __device__ __forceinline__ void dequant8(uint32_t q, float s, float* f) {
 // warp, ncu showed L1/TEX at 89% and DRAM at only 38% for M = 8: the kernel was L1-bound,
 // not memory-bound. Loading each X chunk once and reusing it for R rows cuts L1 traffic
 // for X by R. M = 1 needs no reuse (X traffic is small), so it keeps R = 1.
-template <int M, int R>
+template <int M, int R, typename OutT>
 __global__ void __launch_bounds__(256)
     w4a16_gemv_kernel(const __nv_bfloat16* __restrict__ X, const uint32_t* __restrict__ Wq,
-                      const __nv_bfloat16* __restrict__ S, float* __restrict__ Y, int N, int K,
+                      const __nv_bfloat16* __restrict__ S, OutT* __restrict__ Y, int N, int K,
                       int G) {
   const int warp = threadIdx.x / 32, lane = threadIdx.x % 32;
   const int n0 = (blockIdx.x * 8 + warp) * R;
@@ -87,12 +90,13 @@ __global__ void __launch_bounds__(256)
 #pragma unroll
     for (int m = 0; m < M; ++m) {
       const float v = w4_warp_sum(acc[r][m]);
-      if (lane == 0 && n0 + r < N) Y[(size_t)m * N + n0 + r] = v;
+      if (lane == 0 && n0 + r < N) store_out(&Y[(size_t)m * N + n0 + r], v);
     }
 }
 
-inline void w4a16_gemv(const __nv_bfloat16* X, const uint32_t* Wq, const __nv_bfloat16* S, float* Y,
-                       int M, int N, int K, int G) {
+template <typename OutT>
+inline void w4a16_gemv(const __nv_bfloat16* X, const uint32_t* Wq, const __nv_bfloat16* S, OutT* Y,
+                       int M, int N, int K, int G, cudaStream_t stream = 0) {
   if (K % 32 || G % 32 || K % G) {
     std::fprintf(stderr, "w4a16_gemv needs K %% 32 == 0, G %% 32 == 0, K %% G == 0\n");
     std::exit(EXIT_FAILURE);
@@ -100,10 +104,10 @@ inline void w4a16_gemv(const __nv_bfloat16* X, const uint32_t* Wq, const __nv_bf
   const dim3 block(256);
   auto grid = [&](int R) { return dim3((N + 8 * R - 1) / (8 * R)); };
   switch (M) {
-    case 1: w4a16_gemv_kernel<1, 1><<<grid(1), block>>>(X, Wq, S, Y, N, K, G); break;
-    case 2: w4a16_gemv_kernel<2, 4><<<grid(4), block>>>(X, Wq, S, Y, N, K, G); break;
-    case 4: w4a16_gemv_kernel<4, 4><<<grid(4), block>>>(X, Wq, S, Y, N, K, G); break;
-    case 8: w4a16_gemv_kernel<8, 4><<<grid(4), block>>>(X, Wq, S, Y, N, K, G); break;
+    case 1: w4a16_gemv_kernel<1, 1, OutT><<<grid(1), block, 0, stream>>>(X, Wq, S, Y, N, K, G); break;
+    case 2: w4a16_gemv_kernel<2, 4, OutT><<<grid(4), block, 0, stream>>>(X, Wq, S, Y, N, K, G); break;
+    case 4: w4a16_gemv_kernel<4, 4, OutT><<<grid(4), block, 0, stream>>>(X, Wq, S, Y, N, K, G); break;
+    case 8: w4a16_gemv_kernel<8, 4, OutT><<<grid(4), block, 0, stream>>>(X, Wq, S, Y, N, K, G); break;
     default:
       std::fprintf(stderr, "w4a16_gemv supports M in {1, 2, 4, 8}\n");
       std::exit(EXIT_FAILURE);
@@ -117,11 +121,11 @@ inline void w4a16_gemv(const __nv_bfloat16* X, const uint32_t* Wq, const __nv_bf
 //   compute   A via ldmatrix.x4, B via ldmatrix.x4 (non-trans: rows of Bd are n, k contiguous,
 //             which is exactly mma's "col" B operand), mma.sync m16n8k16
 // REQUIRES: M % BM == 0, N % BN == 0, K % BK == 0, G % BK == 0.
-template <int BM, int BN, int BK, int WARPS_M, int WARPS_N, int STAGES>
+template <int BM, int BN, int BK, int WARPS_M, int WARPS_N, int STAGES, typename OutT>
 __global__ void __launch_bounds__(WARPS_M * WARPS_N * 32)
     w4a16_gemm_kernel(int M, int N, int K, const __nv_bfloat16* __restrict__ A,
                       const uint32_t* __restrict__ Wq, const __nv_bfloat16* __restrict__ S, int G,
-                      float* __restrict__ C) {
+                      OutT* __restrict__ C) {
   constexpr int NUM_THREADS = WARPS_M * WARPS_N * 32;
   constexpr int WM = BM / WARPS_M, WN = BN / WARPS_N;
   constexpr int MI = WM / 16, NI = WN / 8;
@@ -226,33 +230,72 @@ __global__ void __launch_bounds__(WARPS_M * WARPS_N * 32)
     for (int j = 0; j < NI; ++j) {
       const int row = blockIdx.y * BM + warpRow * WM + i * 16 + g;
       const int col = blockIdx.x * BN + warpCol * WN + j * 8 + 2 * t;
-      *reinterpret_cast<float2*>(&C[(size_t)row * N + col]) = make_float2(acc[i][j][0], acc[i][j][1]);
-      *reinterpret_cast<float2*>(&C[(size_t)(row + 8) * N + col]) =
-          make_float2(acc[i][j][2], acc[i][j][3]);
+      if constexpr (sizeof(OutT) == 4) {
+        *reinterpret_cast<float2*>(&C[(size_t)row * N + col]) = make_float2(acc[i][j][0], acc[i][j][1]);
+        *reinterpret_cast<float2*>(&C[(size_t)(row + 8) * N + col]) =
+            make_float2(acc[i][j][2], acc[i][j][3]);
+      } else {
+        *reinterpret_cast<__nv_bfloat162*>(&C[(size_t)row * N + col]) =
+            __floats2bfloat162_rn(acc[i][j][0], acc[i][j][1]);
+        *reinterpret_cast<__nv_bfloat162*>(&C[(size_t)(row + 8) * N + col]) =
+            __floats2bfloat162_rn(acc[i][j][2], acc[i][j][3]);
+      }
     }
 }
 
-template <int WARPS_M, int WARPS_N>
+template <int WARPS_M, int WARPS_N, typename OutT>
 inline void w4a16_gemm_cfg(const __nv_bfloat16* A, const uint32_t* Wq, const __nv_bfloat16* S,
-                           float* C, int M, int N, int K, int G) {
+                           OutT* C, int M, int N, int K, int G, cudaStream_t stream) {
   constexpr int BM = 128, BN = 128, BK = 32, STAGES = 2;
   constexpr int SMEM = STAGES * BM * (BK + 8) * 2 + STAGES * BN * (BK / 8) * 4 + BN * (BK + 8) * 2;
   if (M % BM || N % BN || K % BK || G % BK) {
     std::fprintf(stderr, "w4a16_gemm needs M%%%d, N%%%d, K%%%d, G%%%d == 0\n", BM, BN, BK, BK);
     std::exit(EXIT_FAILURE);
   }
-  auto kernel = w4a16_gemm_kernel<BM, BN, BK, WARPS_M, WARPS_N, STAGES>;
+  auto kernel = w4a16_gemm_kernel<BM, BN, BK, WARPS_M, WARPS_N, STAGES, OutT>;
   static bool configured = false;
   if (!configured) {
     CUDA_CHECK(cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM));
     configured = true;
   }
   dim3 grid(N / BN, M / BM);
-  kernel<<<grid, WARPS_M * WARPS_N * 32, SMEM>>>(M, N, K, A, Wq, S, G, C);
+  kernel<<<grid, WARPS_M * WARPS_N * 32, SMEM, stream>>>(M, N, K, A, Wq, S, G, C);
 }
 // v1: 4 warps, 64x64 warp tiles (Phase 1's fastest config). v2: 8 warps, 64x32 warp tiles.
-inline void w4a16_gemm(const __nv_bfloat16* A, const uint32_t* Wq, const __nv_bfloat16* S, float* C,
-                       int M, int N, int K, int G, int variant = 1) {
-  if (variant == 1) w4a16_gemm_cfg<2, 2>(A, Wq, S, C, M, N, K, G);
-  else w4a16_gemm_cfg<2, 4>(A, Wq, S, C, M, N, K, G);
+template <typename OutT>
+inline void w4a16_gemm(const __nv_bfloat16* A, const uint32_t* Wq, const __nv_bfloat16* S, OutT* C,
+                       int M, int N, int K, int G, int variant = 1, cudaStream_t stream = 0) {
+  if (variant == 1) w4a16_gemm_cfg<2, 2, OutT>(A, Wq, S, C, M, N, K, G, stream);
+  else w4a16_gemm_cfg<2, 4, OutT>(A, Wq, S, C, M, N, K, G, stream);
+}
+
+// ============================ quantization ============================
+// One thread per (row, group): scale = max|w| / 7 (rounded to bf16), q = round(w / scale) + 8.
+__global__ void quantize_w4_kernel(const __nv_bfloat16* __restrict__ W, uint32_t* __restrict__ Wq,
+                                   __nv_bfloat16* __restrict__ S, int N, int K, int g_size) {
+  const int KG = K / g_size;
+  const size_t total = (size_t)N * KG;
+  for (size_t idx = blockIdx.x * (size_t)blockDim.x + threadIdx.x; idx < total;
+       idx += (size_t)gridDim.x * blockDim.x) {
+    const size_t n = idx / KG;
+    const int g = static_cast<int>(idx % KG);
+    const __nv_bfloat16* w = W + n * K + (size_t)g * g_size;
+    float mx = 0.f;
+    for (int i = 0; i < g_size; ++i) mx = fmaxf(mx, fabsf(__bfloat162float(w[i])));
+    const __nv_bfloat16 sb = __float2bfloat16(mx > 0.f ? mx / 7.f : 1.f);
+    const float sf = __bfloat162float(sb);
+    S[idx] = sb;
+    for (int j = 0; j < g_size / 8; ++j) {
+      uint32_t word = 0;
+      for (int i = 0; i < 8; ++i) {
+        const int q = min(15, max(0, __float2int_rn(__bfloat162float(w[j * 8 + i]) / sf) + 8));
+        word |= static_cast<uint32_t>(q) << (4 * i);
+      }
+      Wq[n * (K / 8) + (size_t)g * (g_size / 8) + j] = word;
+    }
+  }
+}
+inline void w4_quantize(const __nv_bfloat16* W, uint32_t* Wq, __nv_bfloat16* S, int N, int K, int G,
+                        cudaStream_t stream = 0) {
+  quantize_w4_kernel<<<grid_for((size_t)N * (K / G)), 256, 0, stream>>>(W, Wq, S, N, K, G);
 }

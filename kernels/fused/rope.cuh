@@ -9,9 +9,11 @@
 
 // ---------------- fused: Q and K in one in-place pass, sin/cos computed on the fly ----------------
 // One thread rotates 8 pairs: a 16-byte chunk at i and its partner at i + D/2.
+// pos0: position of token 0 (decode: current sequence length). q_stride / k_stride: elements
+// between consecutive tokens (Hq*D / Hk*D when contiguous; larger inside a fused buffer).
 __global__ void rope_fused_kernel(__nv_bfloat16* __restrict__ q, __nv_bfloat16* __restrict__ k,
                                   const float* __restrict__ inv_freq, int T, int Hq, int Hk,
-                                  int D) {
+                                  int D, int pos0, long long q_stride, long long k_stride) {
   const int chunks = D / 16;
   const size_t total = (size_t)T * (Hq + Hk) * chunks;
   for (size_t idx = blockIdx.x * (size_t)blockDim.x + threadIdx.x; idx < total;
@@ -21,7 +23,7 @@ __global__ void rope_fused_kernel(__nv_bfloat16* __restrict__ q, __nv_bfloat16* 
     const int h = static_cast<int>(rest % (Hq + Hk));
     const int t = static_cast<int>(rest / (Hq + Hk));
     __nv_bfloat16* base =
-        h < Hq ? q + ((size_t)t * Hq + h) * D : k + ((size_t)t * Hk + (h - Hq)) * D;
+        h < Hq ? q + (size_t)t * q_stride + (size_t)h * D : k + (size_t)t * k_stride + (size_t)(h - Hq) * D;
     uint4* lo_p = reinterpret_cast<uint4*>(base + c * 8);
     uint4* hi_p = reinterpret_cast<uint4*>(base + D / 2 + c * 8);
     float lo[8], hi[8];
@@ -30,7 +32,7 @@ __global__ void rope_fused_kernel(__nv_bfloat16* __restrict__ q, __nv_bfloat16* 
 #pragma unroll
     for (int e = 0; e < 8; ++e) {
       float s, co;
-      sincosf(static_cast<float>(t) * inv_freq[c * 8 + e], &s, &co);
+      sincosf(static_cast<float>(pos0 + t) * inv_freq[c * 8 + e], &s, &co);
       const float x1 = lo[e], x2 = hi[e];
       lo[e] = x1 * co - x2 * s;
       hi[e] = x2 * co + x1 * s;
@@ -41,9 +43,13 @@ __global__ void rope_fused_kernel(__nv_bfloat16* __restrict__ q, __nv_bfloat16* 
 }
 
 inline void rope_fused(__nv_bfloat16* q, __nv_bfloat16* k, const float* inv_freq, int T, int Hq,
-                       int Hk, int D) {
+                       int Hk, int D, int pos0 = 0, long long q_stride = -1, long long k_stride = -1,
+                       cudaStream_t stream = 0) {
+  if (q_stride < 0) q_stride = (long long)Hq * D;
+  if (k_stride < 0) k_stride = (long long)Hk * D;
   const size_t total = (size_t)T * (Hq + Hk) * (D / 16);
-  rope_fused_kernel<<<grid_for(total), 256>>>(q, k, inv_freq, T, Hq, Hk, D);
+  rope_fused_kernel<<<grid_for(total), 256, 0, stream>>>(q, k, inv_freq, T, Hq, Hk, D, pos0, q_stride,
+                                                         k_stride);
 }
 
 // ---------------- eager: HF apply_rotary_pos_emb, one kernel per op ----------------

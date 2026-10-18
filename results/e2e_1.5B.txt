@@ -1,0 +1,49 @@
+GPU: NVIDIA L4 | torch 2.14.1+cu130 | model Qwen/Qwen2.5-1.5B
+Loading weights:   0%|          | 0/338 [00:00<?, ?it/s]Loading weights:  43%|████▎     | 147/338 [00:00<00:00, 1463.07it/s]Loading weights:  87%|████████▋ | 294/338 [00:00<00:00, 1449.75it/s]Loading weights: 100%|██████████| 338/338 [00:00<00:00, 1474.77it/s]
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+[transformers] Token indices sequence length is longer than the specified maximum sequence length for this model (299078 > 131072). Running this sequence through the model will result in indexing errors
+  layers=28 hidden=1536 heads=12 kv_heads=2 head_dim=128 intermediate=8960
+
+[1] Logits vs Hugging Face on the first 512 tokens of WikiText-2 (test)
+  configuration                       top-1 agree  max |dlogit|  mean |dlogit|
+  torch ops                                98.44%         1.383         0.0420
+  norm | bf16                              98.63%         1.017         0.0421
+  rope | bf16                              98.83%         1.383         0.0419
+  flash | bf16                             97.46%         1.383         0.0413
+  swiglu | bf16                            98.44%         1.852         0.0415
+  norm+rope+flash+swiglu | bf16            98.44%         0.803         0.0413
+  (quantized all linear layers to 4 bits in 0.1 s)
+  norm+rope+flash+swiglu | W4              82.23%        19.641         0.7005
+
+[2] Perplexity on WikiText-2 (test): 16 chunks x 512 tokens
+  HF bf16            14.334
+  nanoserve bf16     14.353   (+0.13% vs HF)
+  nanoserve W4 g128  17.562   (+22.51% vs HF)   0.516 B/weight
+  nanoserve W4 g64   16.599   (+15.80% vs HF)   0.531 B/weight
+  nanoserve W4 g32   16.074   (+12.13% vs HF)   0.562 B/weight
+
+[3] Causal attention at model shapes (Hq=12, Hkv=2, D=128), TFLOP/s
+       N   SDPA ms  TFLOP/s   ours ms  TFLOP/s  ours/SDPA  max diff
+    1024     0.071     45.3     0.075     43.0      0.95x    0.0039
+    2048     0.214     60.3     0.236     54.7      0.91x    0.0039
+    4096     0.776     66.4     1.127     45.8      0.69x    0.0039
+
+[4] Prompt processing (prefill, logits for every position), tokens/s
+       T         HF  nanoserve bf16  nanoserve W4
+     512      12923           13649         10514
+    2048      13227           14822         11662
+
+[5] Generation: 128-token prompt, 64 new tokens (greedy), decode tokens/s
+  HF bf16             46.8 tok/s
+  nanoserve bf16      71.8 tok/s   (1.53x)
+  nanoserve W4        71.9 tok/s   (1.54x)
+
+[6] Greedy continuations of "The key idea behind FlashAttention is"
+  HF bf16            ' to use a self-attention mechanism to compute the attention weights for each token in the input sequence. The attention weights are then used to compute the weighted sum of the input sequence, which is the output'
+  runner, torch ops  ' to use a 1D convolution to compute the attention weights. The convolution is applied to the query and key vectors, and the result is a vector of attention weights. The attention weights are then used'
+  nanoserve bf16     ' to use a 1D convolution to compute the attention weights. The convolution is applied to the query and key vectors, and the result is a vector of attention weights. The attention weights are then used'
+  nanoserve W4       ' to use a single attention mechanism to simultaneously attend to multiple inputs. The attention mechanism is a linear combination of the inputs, and the weights of the combination are learned. The FlashAttention mechanism is a linear'
+  tokens matching HF: runner with torch ops 3/40, with nanoserve kernels 3/40
+  nanoserve kernels vs the same runner with torch ops: 40/40
+
+Wrote results/e2e_Qwen2.5-1.5B.json

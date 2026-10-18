@@ -26,16 +26,26 @@
 
 #include "../hgemm/ptx.cuh"
 
+// Element strides for batch, head and token, so Q/K/V can be read in place from projection
+// outputs ([T, H*D] token-major) or from [B*H, N, D] head-major tensors alike.
+// GQA: query head h reads K/V head h / (Hq / Hk).
+struct FlashArgs {
+  const __nv_bfloat16* q;
+  const __nv_bfloat16* k;
+  const __nv_bfloat16* v;
+  __nv_bfloat16* o;
+  int N, Hq, Hk;
+  long long q_b, q_h, q_t, k_b, k_h, k_t, v_b, v_h, v_t, o_b, o_h, o_t;
+  float scale_log2;
+};
+
 __device__ __forceinline__ uint32_t pack_bf16x2(float lo, float hi) {
   __nv_bfloat162 v = __floats2bfloat162_rn(lo, hi);  // .x = lo (low 16 bits)
   return *reinterpret_cast<uint32_t*>(&v);
 }
 
 template <int D, int BR, int BC, int NWARPS, bool CAUSAL>
-__global__ void __launch_bounds__(NWARPS * 32)
-    flash_fwd_kernel(const __nv_bfloat16* __restrict__ Q, const __nv_bfloat16* __restrict__ K,
-                     const __nv_bfloat16* __restrict__ V, __nv_bfloat16* __restrict__ O, int N,
-                     float scale_log2) {
+__global__ void __launch_bounds__(NWARPS * 32) flash_fwd_kernel(const FlashArgs args) {
   static_assert(BR == NWARPS * 16, "each warp owns 16 query rows");
   static_assert(D % 16 == 0 && BC % 16 == 0, "tile shapes");
   constexpr int NT = NWARPS * 32;
@@ -51,22 +61,29 @@ __global__ void __launch_bounds__(NWARPS * 32)
   __nv_bfloat16* Ks = Qs + BR * LD;                                 // 2 x BC x LD
   __nv_bfloat16* Vs = Ks + 2 * BC * LD;                             // 2 x BC x LD
 
-  const int qblk = blockIdx.x;
-  const size_t head = (size_t)blockIdx.y * N * D;
-  Q += head + (size_t)qblk * BR * D;
-  O += head + (size_t)qblk * BR * D;
-  K += head;
-  V += head;
+  // Grid: x = (batch, head), y = query block. With a causal mask, query block i visits i+1 key
+  // tiles, so blocks are handed out longest-first (reversed y): the heavy blocks start early and
+  // the short ones fill the tail, instead of a few heavy blocks running alone at the end.
+  const int qblk = CAUSAL ? (int)(gridDim.y - 1 - blockIdx.y) : (int)blockIdx.y;
+  const int N = args.N;
+  const float scale_log2 = args.scale_log2;
+  const int b = blockIdx.x / args.Hq, hq = blockIdx.x % args.Hq;
+  const int hk = hq / (args.Hq / args.Hk);
+  const long long q_t = args.q_t, k_t = args.k_t, v_t = args.v_t, o_t = args.o_t;
+  const __nv_bfloat16* Q = args.q + b * args.q_b + hq * args.q_h + (long long)qblk * BR * q_t;
+  __nv_bfloat16* O = args.o + b * args.o_b + hq * args.o_h + (long long)qblk * BR * o_t;
+  const __nv_bfloat16* K = args.k + b * args.k_b + hk * args.k_h;
+  const __nv_bfloat16* V = args.v + b * args.v_b + hk * args.v_h;
 
   const int tid = threadIdx.x, lane = tid % 32, warp = tid / 32;
   const int g = lane / 4, t = lane % 4;
   const int lq = lane / 8, lr = lane % 8;  // ldmatrix: which 8x8 matrix, which row
 
-  auto load_rows = [&](__nv_bfloat16* dst, const __nv_bfloat16* src, int rows) {
+  auto load_rows = [&](__nv_bfloat16* dst, const __nv_bfloat16* src, int rows, long long tok) {
     constexpr int VPR = D / 8;  // 16-byte vectors per row
     for (int v = tid; v < rows * VPR; v += NT) {
       const int row = v / VPR, col = (v % VPR) * 8;
-      cp_async_16(&dst[row * LD + col], &src[(size_t)row * D + col]);
+      cp_async_16(&dst[row * LD + col], &src[(long long)row * tok + col]);
     }
   };
 
@@ -74,10 +91,10 @@ __global__ void __launch_bounds__(NWARPS * 32)
   const int n_tiles = CAUSAL ? ((qblk + 1) * BR + BC - 1) / BC : N / BC;
 
   // Group 0: Q. Group 1: K/V tile 0.
-  load_rows(Qs, Q, BR);
+  load_rows(Qs, Q, BR, q_t);
   cp_async_commit();
-  load_rows(Ks, K, BC);
-  load_rows(Vs, V, BC);
+  load_rows(Ks, K, BC, k_t);
+  load_rows(Vs, V, BC, v_t);
   cp_async_commit();
 
   cp_async_wait<1>();  // Q has landed
@@ -100,8 +117,8 @@ __global__ void __launch_bounds__(NWARPS * 32)
     __syncthreads();     // ...for everyone, and tile kt-1's buffer is free
     if (kt + 1 < n_tiles) {
       const int nb = (kt + 1) & 1;
-      load_rows(Ks + nb * BC * LD, K + (size_t)(kt + 1) * BC * D, BC);
-      load_rows(Vs + nb * BC * LD, V + (size_t)(kt + 1) * BC * D, BC);
+      load_rows(Ks + nb * BC * LD, K + (long long)(kt + 1) * BC * k_t, BC, k_t);
+      load_rows(Vs + nb * BC * LD, V + (long long)(kt + 1) * BC * v_t, BC, v_t);
     }
     cp_async_commit();
 
@@ -204,19 +221,18 @@ __global__ void __launch_bounds__(NWARPS * 32)
 #pragma unroll
   for (int n = 0; n < ON; ++n) {
     const int col = n * 8 + 2 * t;
-    *reinterpret_cast<__nv_bfloat162*>(&O[(size_t)(warp * 16 + g) * D + col]) =
+    *reinterpret_cast<__nv_bfloat162*>(&O[(long long)(warp * 16 + g) * o_t + col]) =
         __floats2bfloat162_rn(o[n][0] * inv0, o[n][1] * inv0);
-    *reinterpret_cast<__nv_bfloat162*>(&O[(size_t)(warp * 16 + g + 8) * D + col]) =
+    *reinterpret_cast<__nv_bfloat162*>(&O[(long long)(warp * 16 + g + 8) * o_t + col]) =
         __floats2bfloat162_rn(o[n][2] * inv1, o[n][3] * inv1);
   }
 }
 
 template <int D, int BR, int BC, int NWARPS, bool CAUSAL>
-inline void launch_flash_fwd_cfg(const __nv_bfloat16* Q, const __nv_bfloat16* K,
-                                 const __nv_bfloat16* V, __nv_bfloat16* O, int BH, int N) {
+inline void launch_flash_fwd_cfg(FlashArgs a, int B, cudaStream_t stream) {
   constexpr int SMEM = (BR + 4 * BC) * (D + 8) * (int)sizeof(__nv_bfloat16);
-  if (N % BR || N % BC) {
-    std::fprintf(stderr, "flash_fwd needs N %% %d == 0\n", BR);
+  if (a.N % BR || a.N % BC || a.Hk <= 0 || a.Hq % a.Hk) {
+    std::fprintf(stderr, "flash_fwd needs N %% %d == 0 and Hq %% Hk == 0\n", BR);
     std::exit(EXIT_FAILURE);
   }
   auto kernel = flash_fwd_kernel<D, BR, BC, NWARPS, CAUSAL>;
@@ -225,33 +241,46 @@ inline void launch_flash_fwd_cfg(const __nv_bfloat16* Q, const __nv_bfloat16* K,
     CUDA_CHECK(cudaFuncSetAttribute(kernel, cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM));
     configured = true;
   }
-  const float scale_log2 = 1.4426950408889634f / sqrtf(static_cast<float>(D));
-  dim3 grid(N / BR, BH);
-  kernel<<<grid, NWARPS * 32, SMEM>>>(Q, K, V, O, N, scale_log2);
+  a.scale_log2 = 1.4426950408889634f / sqrtf(static_cast<float>(D));
+  dim3 grid(B * a.Hq, a.N / BR);
+  kernel<<<grid, NWARPS * 32, SMEM, stream>>>(a);
 }
 
 // variant 1: BR=64 (4 warps), BC=64.    smem: D=64 46 KB (2 blocks/SM), D=128 87 KB (1 block/SM)
 // variant 2: BR=128 (8 warps), BC=64 for D=64 (55 KB) / BC=32 for D=128 (70 KB):
 //            one block/SM either way, but 8 warps and each K/V tile serves 128 queries.
 template <int D, bool CAUSAL>
-inline void flash_fwd_dispatch(int variant, const __nv_bfloat16* Q, const __nv_bfloat16* K,
-                               const __nv_bfloat16* V, __nv_bfloat16* O, int BH, int N) {
+inline void flash_fwd_dispatch(int variant, const FlashArgs& a, int B, cudaStream_t stream) {
   constexpr int BC2 = (D == 128) ? 32 : 64;
-  if (variant == 1) launch_flash_fwd_cfg<D, 64, 64, 4, CAUSAL>(Q, K, V, O, BH, N);
-  else launch_flash_fwd_cfg<D, 128, BC2, 8, CAUSAL>(Q, K, V, O, BH, N);
+  if (variant == 1) launch_flash_fwd_cfg<D, 64, 64, 4, CAUSAL>(a, B, stream);
+  else launch_flash_fwd_cfg<D, 128, BC2, 8, CAUSAL>(a, B, stream);
 }
 
-inline void flash_attention_fwd(const __nv_bfloat16* Q, const __nv_bfloat16* K,
-                                const __nv_bfloat16* V, __nv_bfloat16* O, int BH, int N, int D,
-                                bool causal, int variant = 1) {
+// General entry point (strided, GQA).
+inline void flash_attention_fwd_strided(const FlashArgs& a, int B, int D, bool causal, int variant,
+                                        cudaStream_t stream = 0) {
   if (D == 64) {
-    causal ? flash_fwd_dispatch<64, true>(variant, Q, K, V, O, BH, N)
-           : flash_fwd_dispatch<64, false>(variant, Q, K, V, O, BH, N);
+    causal ? flash_fwd_dispatch<64, true>(variant, a, B, stream)
+           : flash_fwd_dispatch<64, false>(variant, a, B, stream);
   } else if (D == 128) {
-    causal ? flash_fwd_dispatch<128, true>(variant, Q, K, V, O, BH, N)
-           : flash_fwd_dispatch<128, false>(variant, Q, K, V, O, BH, N);
+    causal ? flash_fwd_dispatch<128, true>(variant, a, B, stream)
+           : flash_fwd_dispatch<128, false>(variant, a, B, stream);
   } else {
     std::fprintf(stderr, "flash_fwd supports D = 64 or 128\n");
     std::exit(EXIT_FAILURE);
   }
+}
+
+// Phase 2 entry point: contiguous [BH, N, D] tensors, one K/V head per query head.
+inline void flash_attention_fwd(const __nv_bfloat16* Q, const __nv_bfloat16* K,
+                                const __nv_bfloat16* V, __nv_bfloat16* O, int BH, int N, int D,
+                                bool causal, int variant = 1) {
+  FlashArgs a{};
+  a.q = Q; a.k = K; a.v = V; a.o = O;
+  a.N = N; a.Hq = 1; a.Hk = 1;
+  const long long hs = (long long)N * D;
+  a.q_b = a.k_b = a.v_b = a.o_b = hs;
+  a.q_h = a.k_h = a.v_h = a.o_h = 0;
+  a.q_t = a.k_t = a.v_t = a.o_t = D;
+  flash_attention_fwd_strided(a, BH, D, causal, variant);
 }

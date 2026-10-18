@@ -1,0 +1,103 @@
+{
+  "gpu": "NVIDIA L4",
+  "model": "Qwen/Qwen2.5-7B",
+  "torch": "2.14.1+cu130",
+  "correctness": [
+    [
+      "torch ops",
+      98.4375,
+      0.5703125,
+      0.04397013410925865
+    ],
+    [
+      "norm | bf16",
+      98.6328125,
+      0.514404296875,
+      0.0441904291510582
+    ],
+    [
+      "rope | bf16",
+      98.6328125,
+      0.5,
+      0.04632280766963959
+    ],
+    [
+      "flash | bf16",
+      98.6328125,
+      0.5625,
+      0.046343810856342316
+    ],
+    [
+      "swiglu | bf16",
+      98.6328125,
+      0.53125,
+      0.04487232118844986
+    ],
+    [
+      "norm+rope+flash+swiglu | bf16",
+      98.828125,
+      0.6875,
+      0.0447150282561779
+    ],
+    [
+      "norm+rope+flash+swiglu | W4",
+      87.3046875,
+      14.59375,
+      0.7893610000610352
+    ]
+  ],
+  "perplexity": {
+    "source": "WikiText-2 (test)",
+    "hf": 8.666101239518266,
+    "nanoserve_bf16": 8.667975558056535,
+    "nanoserve_w4_by_group": {
+      "128": 10.026207371634806
+    }
+  },
+  "attention": [
+    [
+      1024,
+      0.21063680648803712,
+      0.288102388381958
+    ],
+    [
+      2048,
+      0.5694496154785156,
+      0.7621119976043701
+    ],
+    [
+      4096,
+      2.1812160491943358,
+      2.8983808517456056
+    ]
+  ],
+  "prefill_ms": [
+    [
+      512,
+      171.9234619140625,
+      166.9105712890625,
+      192.5326904296875
+    ],
+    [
+      2048,
+      587.657421875,
+      540.2181640625,
+      726.698388671875
+    ]
+  ],
+  "decode_tok_s": {
+    "hf": 17.254151581512502,
+    "nanoserve_bf16": 17.678315974922654,
+    "nanoserve_w4": 45.09292394710571
+  },
+  "samples": {
+    "prompt": "The key idea behind FlashAttention is",
+    "hf": " to use a block-sparse attention mask, where each block is a square matrix of size $M \\times M$. The mask is filled with ones in the upper triangle and zeros elsewhere. The attention",
+    "runner_torch_ops": " to use a block-sparse attention mask, where each block is a square matrix of size $M \\times M$. The mask is filled with ones in the upper triangle and zeros elsewhere. The attention",
+    "nanoserve_bf16": " to use a block-sparse attention mask to reduce the number of FLOPs and memory accesses. The block-sparse attention mask is a binary matrix that indicates which attention heads are allowed to attend to",
+    "nanoserve_w4": " to reduce the number of FLOPs required to compute the softmax normalization factor in the attention operation. This is achieved by using a more efficient algorithm for computing the softmax normalization factor, which reduces the number",
+    "match_hf_torch_ops": 40,
+    "match_hf_nanoserve": 8,
+    "match_torch_ops_nanoserve": 8
+  }
+}

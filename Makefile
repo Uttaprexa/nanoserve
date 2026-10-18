@@ -17,15 +17,16 @@ W4_DEPS    := include/common.cuh $(wildcard kernels/quant/*.cuh) kernels/fused/v
 MOE_DEPS   := include/common.cuh $(wildcard kernels/moe/*.cuh) kernels/fused/swiglu.cuh kernels/fused/vec.cuh kernels/hgemm/ptx.cuh
 
 
-.PHONY: all sgemm hgemm attn fused w4a16 moe run run-hgemm run-attn run-fused run-w4a16 run-moe sass clean
+.PHONY: all sgemm hgemm attn fused w4a16 moe lib run run-hgemm run-attn run-fused run-w4a16 run-moe sass clean
 
-all: sgemm hgemm attn fused w4a16 moe
+all: sgemm hgemm attn fused w4a16 moe lib
 sgemm: build/bench_sgemm
 hgemm: build/bench_hgemm
 attn: build/bench_attn
 fused: build/bench_fused
 w4a16: build/bench_w4a16
 moe: build/bench_moe
+lib: build/libnanoserve.so
 
 build/bench_sgemm: bench/bench_sgemm.cu $(SGEMM_DEPS)
 > @bash scripts/nvcc_build.sh sgemm $(NVCC) $(NVCCFLAGS) $< -o $@ $(LDLIBS)
@@ -44,6 +45,11 @@ build/bench_w4a16: bench/bench_w4a16.cu $(W4_DEPS)
 
 build/bench_moe: bench/bench_moe.cu $(MOE_DEPS)
 > @bash scripts/nvcc_build.sh moe $(NVCC) $(NVCCFLAGS) $< -o $@ $(LDLIBS)
+
+# Shared library for the PyTorch integration (Phase 6), loaded with ctypes.
+LIB_DEPS := include/common.cuh $(wildcard kernels/*/*.cuh)
+build/libnanoserve.so: csrc/nanoserve_ops.cu $(LIB_DEPS)
+> @bash scripts/nvcc_build.sh lib $(NVCC) $(NVCCFLAGS) -Xcompiler -fPIC -shared $< -o $@
 
 run: build/bench_sgemm
 > ./build/bench_sgemm

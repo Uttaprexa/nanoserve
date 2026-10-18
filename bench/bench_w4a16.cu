@@ -39,32 +39,6 @@ __global__ void fill_kernel(bf16* p, size_t n, uint32_t seed, float scale) {
   }
 }
 
-// One thread per (row, group): scale = max|w| / 7 (rounded to bf16), q = round(w / scale) + 8.
-__global__ void quantize_w4_kernel(const bf16* __restrict__ W, uint32_t* __restrict__ Wq,
-                                   bf16* __restrict__ S, int N, int K, int g_size) {
-  const int KG = K / g_size;
-  const size_t total = (size_t)N * KG;
-  for (size_t idx = blockIdx.x * (size_t)blockDim.x + threadIdx.x; idx < total;
-       idx += (size_t)gridDim.x * blockDim.x) {
-    const size_t n = idx / KG;
-    const int g = static_cast<int>(idx % KG);
-    const bf16* w = W + n * K + (size_t)g * g_size;
-    float mx = 0.f;
-    for (int i = 0; i < g_size; ++i) mx = fmaxf(mx, fabsf(__bfloat162float(w[i])));
-    const bf16 sb = __float2bfloat16(mx > 0.f ? mx / 7.f : 1.f);
-    const float sf = __bfloat162float(sb);
-    S[idx] = sb;
-    for (int j = 0; j < g_size / 8; ++j) {
-      uint32_t word = 0;
-      for (int i = 0; i < 8; ++i) {
-        const int q = min(15, max(0, __float2int_rn(__bfloat162float(w[j * 8 + i]) / sf) + 8));
-        word |= static_cast<uint32_t>(q) << (4 * i);
-      }
-      Wq[n * (K / 8) + (size_t)g * (g_size / 8) + j] = word;
-    }
-  }
-}
-
 struct Layer {  // one weight matrix in bf16 and W4 form, plus rotating copies for timing
   int N, K;
   size_t nW, nWq, nS;

@@ -2,7 +2,7 @@
 // Residual add + RMSNorm, as in every Llama-style decoder layer:
 //   x = x + r                       (residual stream, kept for the next layer)
 //   y = x * rsqrt(mean(x^2) + eps) * w
-// x, r, y: [T, H] bf16 row-major; w: [H] bf16.
+// x, r, y: [T, H] bf16 row-major; w: [H] bf16. r may be nullptr: plain RMSNorm, x untouched.
 #include "vec.cuh"
 
 // ---------------- fused: one kernel, one block per row ----------------
@@ -28,13 +28,13 @@ __global__ void __launch_bounds__(256)
     if (idx < vecs) {
       float a[8], b[8];
       unpack8(xr[idx], a);
-      unpack8(rr[idx], b);
+      if (r != nullptr) unpack8(rr[idx], b);
 #pragma unroll
       for (int e = 0; e < 8; ++e) {
-        v[i][e] = round_bf16(a[e] + b[e]);  // the residual stream is stored in bf16
+        v[i][e] = r != nullptr ? round_bf16(a[e] + b[e]) : a[e];  // residual stream stored in bf16
         ss += v[i][e] * v[i][e];
       }
-      xr[idx] = pack8(v[i]);
+      if (r != nullptr) xr[idx] = pack8(v[i]);
     }
   }
   const float inv = rsqrtf(fused_block_sum(ss) / H + eps);
@@ -52,12 +52,12 @@ __global__ void __launch_bounds__(256)
 }
 
 inline void fused_add_rmsnorm(__nv_bfloat16* x, const __nv_bfloat16* r, const __nv_bfloat16* w,
-                              __nv_bfloat16* y, int T, int H, float eps) {
+                              __nv_bfloat16* y, int T, int H, float eps, cudaStream_t stream = 0) {
   if (H % 8 || H / 8 > 256 * 4) {
     std::fprintf(stderr, "fused_add_rmsnorm needs H %% 8 == 0 and H <= 8192\n");
     std::exit(EXIT_FAILURE);
   }
-  fused_add_rmsnorm_kernel<4><<<T, 256>>>(x, r, w, y, H, eps);
+  fused_add_rmsnorm_kernel<4><<<T, 256, 0, stream>>>(x, r, w, y, H, eps);
 }
 
 // ---------------- eager: the op sequence of HF LlamaRMSNorm, one kernel each ----------------

@@ -25,8 +25,30 @@ __global__ void swiglu_fused_kernel(const __nv_bfloat16* __restrict__ gu,
   }
 }
 
-inline void swiglu_fused(const __nv_bfloat16* gu, __nv_bfloat16* out, int T, int I) {
-  swiglu_fused_kernel<<<grid_for((size_t)T * I / 8), 256>>>(gu, out, T, I);
+inline void swiglu_fused(const __nv_bfloat16* gu, __nv_bfloat16* out, int T, int I,
+                         cudaStream_t stream = 0) {
+  swiglu_fused_kernel<<<grid_for((size_t)T * I / 8), 256, 0, stream>>>(gu, out, T, I);
+}
+
+// Same op with gate and up in separate contiguous [T, I] buffers (separate projections, as in
+// HF checkpoints, so no fused weight copy is needed).
+__global__ void swiglu2_fused_kernel(const __nv_bfloat16* __restrict__ gate,
+                                     const __nv_bfloat16* __restrict__ up,
+                                     __nv_bfloat16* __restrict__ out, size_t n8) {
+  for (size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x; i < n8;
+       i += (size_t)gridDim.x * blockDim.x) {
+    float g[8], u[8];
+    unpack8(reinterpret_cast<const uint4*>(gate)[i], g);
+    unpack8(reinterpret_cast<const uint4*>(up)[i], u);
+#pragma unroll
+    for (int e = 0; e < 8; ++e) g[e] = silu(g[e]) * u[e];
+    reinterpret_cast<uint4*>(out)[i] = pack8(g);
+  }
+}
+inline void swiglu2_fused(const __nv_bfloat16* gate, const __nv_bfloat16* up, __nv_bfloat16* out,
+                          int T, int I, cudaStream_t stream = 0) {
+  const size_t n8 = (size_t)T * I / 8;
+  swiglu2_fused_kernel<<<grid_for(n8), 256, 0, stream>>>(gate, up, out, n8);
 }
 
 // ---------------- eager: act_fn(gate) -> tmp (bf16), then tmp * up ----------------
